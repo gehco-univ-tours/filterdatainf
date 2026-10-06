@@ -1,0 +1,2 @@
+date;id_mesure;nb_mobile_med;length_step;alpha_slope;seuil_volt;begin_inf;end_inf;nb_steady;time_inf;mean_steady_flow;time_stop
+19/09/2026;P3_26_09_16_I6;15;64;0.026;0.02;38;9223;20;9185;76.9770431513864;3884.355
