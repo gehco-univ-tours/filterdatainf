@@ -49,5 +49,5 @@ po/*~
 rsconnect/
 
 # Perso folder
-inst/
-old_script/
+inst
+old_script
