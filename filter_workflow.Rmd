@@ -1,0 +1,248 @@
+---
+title: "filter_worklflow"
+output: html_document
+date: "2026-10-06"
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  fig.path = "man/figures/README-",
+  out.width = "100%"
+)
+```
+
+# chargement des packages
+```{r eval= FALSE}
+library(tidyverse)
+library(plotly)
+library(zoo)
+```
+
+# chargement des noms de fichier et modification des noms
+
+```{r eval= FALSE}
+## set working directory
+setwd("C:/Users/wlefranc/Documents/These_GéHCO/3_Experimentation/Test d'infiltration/5_Traitement//filterdatainf")
+
+## chagement du fichier de suivi
+data_suivi <- read.csv("inst/data/data_row/9feuille_suivi.csv", sep=";", header = TRUE)
+
+## chargement des noms des data frame
+files_path <- list.files(
+  path = "inst/data/data_row",
+  pattern = "\\.csv$",
+  full.names = TRUE
+)
+files_path <- files_path[-length(files_path)]
+
+## récupération du nom et de la date
+files_names <- str_split(files_path, pattern = "/", simplify = TRUE)[,4]
+files_dates <- substr(files_names, 1, 6)
+
+## vérification de la présence des noms des fichiers dans le fichier de suivi
+files_toadd <- files_names[!(files_names %in% data_suivi$name_file)]
+
+## ajout du nom des fichiers dans mon tableau de suivi
+data_suivi <- rbind(data_suivi, 
+                    data.frame(name_file = files_toadd, 
+                               status = rep("rowdata", length(files_toadd)), 
+                               date = rep(as.character(Sys.Date()),length(files_toadd))))
+
+## vérifier qu'il n'y a aucun nom de fichier 000001
+if (any(substr(files_toadd, 1, 2) == "00")){
+  names_tochange <- files_names[substr(files_names, 1 ,2) == "00"]
+  for (i in 1:length(names_tochange)) {
+    name <- names_tochange[i] 
+    cat("\nnom actuel :", names_tochange[i], "\n")
+    nouveau_nom <- rstudioapi::showPrompt(
+      title = "Change name",
+      message = paste("Nouveau nom pour", names_tochange[i]),
+      default = ""
+      )
+      readline(prompt = "Nouveau nom : ")
+    if (any(files_names == nouveau_nom)){
+      print("nom déjà attribué")
+      stop("nom déjà attribué")
+    }else{
+      print("nom valide")
+    }
+    file.rename(
+      paste("inst/data/data_row/",name, sep=""),
+      paste("inst/data/data_row/",nouveau_nom, sep=""))
+    data_suivi$rename[data_suivi$name_file == name] <- "oui"
+    data_suivi$name_file[data_suivi$name_file == name] <- nouveau_nom
+    data_suivi$date[data_suivi$name_file == nouveau_nom] <- as.character(Sys.Date())
+    }
+}
+#enregistrement de data_suivi
+write.table(data_suivi,"inst/data/data_row/9feuille_suivi.csv", sep=";", row.names = FALSE)
+```
+
+# update du tableau de suivi et modification des id des points
+
+```{r eval= FALSE}
+## chargement des noms des data frame
+files_path <- list.files(
+  path = "inst/data/data_row",
+  pattern = "\\.csv$",
+  full.names = TRUE
+)
+files_path <- files_path[-length(files_path)]
+
+## chagement du fichier de suivi
+data_suivi <- read.csv("inst/data/data_row/9feuille_suivi.csv", sep=";", header = TRUE)
+
+## selection des fichiers non traité
+files_names <- data_suivi %>% 
+  subset(status == "rowdata") %>% 
+  select(name_file) %>% 
+  pull()
+
+## chargement de chaque fichier et vérification si il y a plusieurs enregistrement
+file_totreat <- c()
+for ( i in 1:length(files_names)){
+  name_file <- files_names[i]
+  assign(name_file, read.csv(paste("inst/data/data_row/", name_file, sep=""), sep=";", header = TRUE, dec=","))
+  if(length(get(name_file) %>% 
+     filter(time..s.<0.2) %>% 
+     select(time..s.) %>% 
+     pull()) > 1){
+    cat("\nfichier :", name_file, "\n à traiter")
+    file_totreat <- c(file_totreat, name_file)
+  }else{
+    cat("\nfichier :", name_file, "\n ok")
+  }
+  rm(list = name_file)
+}
+
+
+```
+
+# Séparation des fichiers avec plusieurs enregistrements (à lancer si file_totrat est plein)
+
+```{r eval= FALSE}
+## vérification si le fichier n'a pas déjà été traité
+if( any( data_suivi %>% 
+          filter(id_point == "oui") %>% 
+          select(name_file) %>% 
+          pull() == file_totreat)){
+  file_totreat <- file_totreat[!(file_totreat %in% (data_suivi %>% 
+                                 filter(id_point == "oui") %>% 
+                                 select(name_file) %>% 
+                                 pull()))]
+}
+if (length(file_totreat) == 0){
+  stop("aucun fichier à enregistrement multiple")
+}
+## Mise à jour des id_points
+for (i in 1:length(file_totreat)){
+  name_file <- file_totreat[i]
+  date_file <- substr(name_file, 1, 6)
+  logger_file <- substr(name_file, 8, 8)
+  # charge du fichier qui possède plusieurs enregistrements
+  data <- read.csv(paste("inst/data/data_row/", name_file, sep=""), sep=";", header = TRUE, dec=".")
+  # repère le début de chaque enregistrement
+  select_row <- row.names(data)[data$time..s.<0.2]
+  select_row <- c(select_row, length(row.names(data))+1)
+  for(j in 1:(length(select_row)-1)){
+    begin <- as.numeric(select_row[j])
+    end <- as.numeric(select_row[j+1])-1
+    # affichage de la taille de l'enregistrement, il est ploté et on doit choisir si on le garde
+    length <- data$time..s.[end]-data$time..s.[begin]
+    cat("\nenregistrement", j, "fait", length, "secondes", "\n")
+    windows()
+    plot(data$time..s.[begin:end], data$V1..Volt.[begin:end],
+         main = paste("enregistrement", j),
+         xlab = "time (sec)",
+         ylab = "volt 1")
+    choix <- readline(prompt = paste0("Conserver l'enregistrement ", j, " ? (o/n) : "))
+    if(tolower(choix) == "o") {
+      # si il est garder, id_point = j
+      data$id_point[begin:end] <- j
+    }else{
+      # si il doit être supprimé, id_point = 0
+    data$id_point[begin:end] <- 0
+    }
+  }
+  # fermeture de tous les graphiques ouverts
+  graphics.off()
+  # enregistrement des modifications effectuées sur id_point
+  write.table(data, paste0("inst/data/data_row/", name_file), sep=";", dec=".", row.names = FALSE)
+  # mise à jour du fichier data_terrain
+  data_terrain <- read.csv("inst/data/data_terrain/suivi_inf.csv", sep = ";", header = TRUE)
+  for(k in unique(data$id_point)[unique(data$id_point) != 0]){
+     data_terrain <- rbind(data_terrain, c(date_file, k, logger_file, rep(NA, 8)))
+  }
+  write.table(data_terrain, "inst/data/data_terrain/suivi_inf.csv", sep = ";", row.names = FALSE)
+  # mise à jour du fichier de suivi
+  data_suivi$id_point[data_suivi$name_file == name_file] <- "oui"
+  write.table(data_suivi,"inst/data/data_row/9feuille_suivi.csv", sep=";", row.names = FALSE)
+  }
+```
+
+# enregistrement de chaque test d'infiltration dans un unique fichier (nom parcelle, date, id infiltro)
+
+```{r eval= FALSE}
+## chargement du fichier terrain
+data_terrain <- read.csv("inst/data/data_terrain/suivi_inf.csv", sep = ";", header = TRUE)
+list_testinf <- list()
+data_remove <- read.csv("inst/data/data_to_filter/data_remove.csv", sep=";")
+## selection des fichiers non traité
+files_names <- data_suivi %>% 
+  subset(status == "rowdata") %>% 
+  select(name_file) %>% 
+  pull()
+# pour chaque fichier à traiter
+for (i in files_names){
+  if(length(files_names) == 0){
+    stop("zéro fichier à ajouter")
+  }
+  name_file <- i
+  date_file <- substr(name_file, 1, 6)
+  logger_file <- substr(name_file, 8, 8)
+  # chargement du fichier à traiter
+  data <- read.csv(paste("inst/data/data_row/", name_file, sep=""), sep=";", header = TRUE)
+  # pour chaque enregistrement dans le fichier
+  for(j in unique(data$id_point)){ 
+    data_unique <- data %>% 
+      subset(id_point == j)
+    if(j == 0){ # si id_point = à 0, alors mettre les données dans un tableau remove
+      data_remove <- rbind(data_remove, data_unique)
+    }else{ # sinon enregistrer chaque test d'infiltromètre dans une liste
+      data_unique <- data_unique %>% 
+        select(time..s.,V1..Volt.,V2..Volt.,V3..Volt.)
+      id_parcelle <- data_terrain %>% 
+        filter(date == date_file & id_logger == logger_file & id_point == j) %>% 
+        select(id_parcelle) %>% 
+        pull()
+      test_inf_select <- data_terrain %>% 
+        filter(date == date_file & id_logger == logger_file & id_point == j ) %>% 
+        select(I_A, I_B, I_C)
+      test_inf_select <- test_inf_select[!is.na(test_inf_select[1,])]
+      # pour chaque test d'infiltration
+      for(k in 1:length(test_inf_select)){
+        id_inf <- test_inf_select[k]
+        data_inf <- data_unique[,c(1,k+1)]
+        list_testinf[[paste(id_parcelle,date_file,id_inf, sep="_")]] <- data_inf
+      }
+    }
+  }
+  # mise à jour du fichier de suivi
+  data_suivi$status[data_suivi$name_file == name_file & data_suivi$status == "rowdata"] <- "data_unique"
+  data_suivi$date[data_suivi$name_file == name_file & data_suivi$status == "rowdata"] <- as.character(Sys.Date())
+}
+## mise à jour des fichier à traiter
+files_names <- c()
+## enregistrement de chaque test d'infiltration et du fichier remove
+for(nom in names(list_testinf)) {
+write.table(
+list_testinf[[nom]],
+file = file.path("inst/data/data_to_filter", paste0(nom, ".txt")),
+row.names = FALSE
+)
+}
+write.table(data_remove, "inst/data/data_to_filter/data_remove.csv", sep=";", row.names = FALSE)
+write.table(data_suivi,"inst/data/data_row/9feuille_suivi.csv", sep=";", row.names = FALSE)
+```
