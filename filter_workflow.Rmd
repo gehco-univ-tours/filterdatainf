@@ -254,7 +254,10 @@ write.table(data_remove, "inst/data/data_to_filter/data_remove.csv", sep=";", ro
 write.table(data_suivi,"inst/data/data_row/9feuille_suivi.csv", sep=";", row.names = FALSE)
 ```
 
+
 # filtre william
+
+## chargement des fonctions
 ```{r eval= FALSE}
 ## fonctions qui vont nous servirent
 ### création de la médiane mobile
@@ -421,13 +424,16 @@ extract_value <- function(row_data, data, seuil, show_graph){
   return(data_end)
 }
 
+```
+
+```{r eval= FALSE}
 ## chargement des noms de fichier
 files_path <- list.files(
   path = "inst/data/data_to_filter",
   pattern = "\\.txt$",
   full.names = TRUE
 )
-files_to_filter <- str_split(files_path, pattern = "/", simplify = TRUE)[,4]
+files_to_filter <- str_remove(str_split(files_path, pattern = "/", simplify = TRUE)[,4], "\\.txt$")
 ## chargement du data suivi
 data_suivi <- read.csv("inst/data/data_to_filter/feuille_suivi.csv", sep=";", header = TRUE)
 ## verification que les fichier n'ont pas déjà été filtré
@@ -442,17 +448,13 @@ if( any( data_suivi %>%
 }
 ## début de la filtration des fichiers
 for (i in files_to_filter){
-  data_row <- read.table(paste("inst/data/data_to_filter/",i, sep=""), header = TRUE, sep = " ")
+  data_row <- read.table(paste("inst/data/data_to_filter/",i,".txt" sep=""), header = TRUE, sep = " ")
   id_point <- str_split(i, pattern = "_", simplify=TRUE)[1]
   date <- str_split(i, pattern = "_", simplify=TRUE)[2]
   id_infiltro <- substr(str_split(i, pattern = "_", simplify=TRUE)[3],1,2)
   ## workflow
-nb_mobile_med <- as.numeric(rstudioapi::showPrompt(
-      title = "k mobile median",
-      message = paste("entrer le k pour", i),
-      default = ""
-      ))
-data <- mobile_med(data_row, nb_mobile_med, show_graph = TRUE)
+nb_mobile_med = 15
+  data <- mobile_med(data_row, nb_mobile_med, show_graph = TRUE)
 begin <- as.numeric(rstudioapi::showPrompt(
       title = "begin infiltration",
       message = paste("entrer le début d'infiltration en seconde pour", i),
@@ -463,25 +465,17 @@ end <- as.numeric(rstudioapi::showPrompt(
       message = paste("entrer la fin d'infiltration en seconde pour", i),
       default = ""
       ))
-liste_slope <- slope(begin, end, data, show_graph = TRUE)
+liste_slope <- slope(begin, end, data, show_graph = FALSE)
 data <- liste_slope[[1]]
 first_point <- liste_slope[[2]]
-alpha <- as.numeric(rstudioapi::showPrompt(
-      title = "coefficient directeur minimum",
-      message = paste("entrer une valeur pour supprimer les coefficients directeurs trop faibles", i),
-      default = ""
-     ))
+alpha <- 0.026
 data$slope[abs(data$slope) <= alpha] <- 0
-liste_plate <- plate(data, show_graph = TRUE)
-k = as.numeric(rstudioapi::showPrompt(
-      title = "longeur minimum des plateau",
-      message = paste("entrer une valeur pour supprimer les plateaux trop cours", i),
-      default = ""
-      ))
+liste_plate <- plate(data, show_graph = FALSE)
+k <- 19
 select_plate <- liste_plate[[1]]$id_plateau[liste_plate[[1]]$nb >= k]
 data_filter <- liste_plate[[2]] %>%
   subset(id_plateau %in% select_plate)
-seuil = 0.010
+seuil = 0.015
 data_inf <- extract_value(data, data_filter, seuil, show_graph = TRUE)
 data_inf <- rbind(data_inf, c(0,0,first_point)) %>%
   arrange(time)
@@ -499,19 +493,13 @@ plot(data_inf$time, data_inf$h_cumulee, main = "infiltration cumulée mm", xlab 
 windows()
 plot(data_inf$time, data_inf$q, main = "flux d'infiltration mm/h", xlab = "time_s", ylab = "flux_mm/h")
 
-## calculer un débit moyen constant
-nb_steady <- as.numeric(rstudioapi::showPrompt(
-      title = "nombre de point constant",
-      message = paste("entrer le nombre de point à moyenner pour Ksat", i),
+## vérifier si le paramétrage nous convient 
+parametrage <- rstudioapi::showPrompt(
+      title = "parametrage OK",
+      message = paste("oui/non"),
       default = ""
-      ))
-mean_steady_flow <- mean(data_inf$q[(length(data_inf$q)-nb_steady):length(data_inf$q)], na.rm = TRUE)
-med_steady_flow <- median(data_inf$q[(length(data_inf$q)-nb_steady):length(data_inf$q)], na.rm = TRUE)
-
-windows()
-plot(data_inf$time, data_inf$q)
-abline(h = mean_steady_flow, col = "red", lwd = 2, lty = 2)
-abline(h = med_steady_flow, col = "blue", lwd = 2, lty = 2)
+      )
+if(parametrage == "oui"){
 ## enregistrer les données
 write.table(
   data_inf[, c("time", "h_cumulee")],
@@ -541,9 +529,114 @@ value <- list(my_date,
            seuil,
            begin,
            end,
-           nb_steady,
            end-begin,
-           mean_steady_flow,
+           max(data_row$time)-end)
+data_resume <- rbind(data_resume, value)
+write.table(
+  data_resume,
+  file = paste("inst/data/data_filter/","data_resume.csv", sep=""),
+  row.names = FALSE,
+  sep=";"
+)
+## mise à jour du tableau de suivi
+data_suivi <- rbind(data_suivi,
+                    c(paste(id_point, date, id_infiltro, sep= "_"),
+                      "oui",
+                      NA,
+                      NA))
+}
+continue <- rstudioapi::showPrompt(
+      title = "passer au fichier suivant",
+      message = paste("oui/non"),
+      default = ""
+      )
+if(continue == "non"){
+  stop()
+}
+}
+write.table(data_suivi,"inst/data/data_to_filter/feuille_suivi.csv", sep=";", row.names = FALSE)
+```
+
+# Filtre William manuel
+```{r eval= FALSE}
+## chargement des noms de fichier
+files_path <- list.files(
+  path = "inst/data/data_to_filter",
+  pattern = "\\.txt$",
+  full.names = TRUE
+)
+files_to_filter <- str_remove(str_split(files_path, pattern = "/", simplify = TRUE)[,4], "\\.txt$")
+## chargement du data suivi
+data_suivi <- read.csv("inst/data/data_to_filter/feuille_suivi.csv", sep=";", header = TRUE)
+## verification que les fichier n'ont pas déjà été filtré
+if( any( data_suivi %>% 
+          filter(filter_W == "oui") %>% 
+          select(name_file) %>% 
+          pull() == files_to_filter)){
+  files_to_filter <- files_to_filter[!(files_to_filter %in% (data_suivi %>% 
+                                 filter(filter_W == "oui") %>% 
+                                 select(name_file) %>% 
+                                 pull()))]
+}
+## début de la filtration des fichiers
+for (i in files_to_filter){
+  data_row <- read.table(paste("inst/data/data_to_filter/",i,".txt" sep=""), header = TRUE, sep = " ")
+  id_point <- str_split(i, pattern = "_", simplify=TRUE)[1]
+  date <- str_split(i, pattern = "_", simplify=TRUE)[2]
+  id_infiltro <- substr(str_split(i, pattern = "_", simplify=TRUE)[3],1,2)
+  ## workflow
+nb_mobile_med <- as.numeric(rstudioapi::showPrompt(title = "k mobile median",message =paste("entrer le k pour", i), default = ""))
+  data <- mobile_med(data_row, nb_mobile_med, show_graph = TRUE)
+begin <- as.numeric(rstudioapi::showPrompt(
+      title = "begin infiltration",
+      message = paste("entrer le début d'infiltration en seconde pour", i),
+      default = ""
+      ))
+end <- as.numeric(rstudioapi::showPrompt(
+      title = "end infiltration",
+      message = paste("entrer la fin d'infiltration en seconde pour", i),
+      default = ""
+      ))
+liste_slope <- slope(begin, end, data, show_graph = TRUE)
+data <- liste_slope[[1]]
+first_point <- liste_slope[[2]]
+alpha <- as.numeric(rstudioapi::showPrompt(title = "coefficient directeur minimum",message =paste("entrer une valeur pour supprimer les coefficients directeurs trop faibles",i),default = ""))
+data$slope[abs(data$slope) <= alpha] <- 0
+liste_plate <- plate(data, show_graph = TRUE)
+k = as.numeric(rstudioapi::showPrompt(title = "longeur minimum des plateau",message = paste("entrer une valeur pour supprimer les plateaux trop cours", i),default = ""))
+select_plate <- liste_plate[[1]]$id_plateau[liste_plate[[1]]$nb >= k]
+data_filter <- liste_plate[[2]] %>%
+  subset(id_plateau %in% select_plate)
+seuil = 0.015
+data_inf <- extract_value(data, data_filter, seuil, show_graph = TRUE)
+data_inf <- rbind(data_inf, c(0,0,first_point)) %>%
+  arrange(time)
+
+## convertir les volts en hauteur et calculer un débit
+data_inf <- data_inf %>%
+  mutate(h_tank = (moyenne-0.2)/0.0044) %>%
+  mutate(h_ring = h_tank*0.38) %>%
+  mutate(h_cumulee = cumsum(c(0, -diff(h_ring)))) %>%
+  mutate(q = ((dplyr::lag(h_ring)-h_ring)/(time - dplyr::lag(time)))*3600) %>%
+  mutate(h_diff = dplyr::lag(h_ring)-h_ring)
+
+windows()
+plot(data_inf$time, data_inf$h_cumulee, main = "infiltration cumulée mm", xlab = "time_s", ylab = "hauteur_mm")
+windows()
+plot(data_inf$time, data_inf$q, main = "flux d'infiltration mm/h", xlab = "time_s", ylab = "flux_mm/h")
+
+## enregistrer un tableau de suivi filtration
+data_resume <- read.csv("inst/data/data_filter/data_resume.csv", sep=";")
+my_date = as.character(Sys.Date())
+value <- list(my_date,
+           paste(id_point,date,id_infiltro, sep="_"),
+           nb_mobile_med,
+           k,
+           alpha,
+           seuil,
+           begin,
+           end,
+           end-begin,
            max(data_row$time)-end)
 data_resume <- rbind(data_resume, value)
 write.table(
@@ -568,4 +661,21 @@ if(continue == "non"){
 }
 }
 write.table(data_suivi,"inst/data/data_to_filter/feuille_suivi.csv", sep=";", row.names = FALSE)
+```
+
+# Calcules suite à la filtration des données
+```{r eval= FALSE}
+## calculer un débit moyen constant
+nb_steady <- as.numeric(rstudioapi::showPrompt(
+      title = "nombre de point constant",
+      message = paste("entrer le nombre de point à moyenner pour Ksat", i),
+      default = ""
+      ))
+mean_steady_flow <- mean(data_inf$q[(length(data_inf$q)-nb_steady):length(data_inf$q)], na.rm = TRUE)
+med_steady_flow <- median(data_inf$q[(length(data_inf$q)-nb_steady):length(data_inf$q)], na.rm = TRUE)
+
+windows()
+plot(data_inf$time, data_inf$q)
+abline(h = mean_steady_flow, col = "red", lwd = 2, lty = 2)
+abline(h = med_steady_flow, col = "blue", lwd = 2, lty = 2)
 ```
